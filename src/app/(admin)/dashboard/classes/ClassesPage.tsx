@@ -1,216 +1,102 @@
+// app/classes/page.tsx (por ejemplo)
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import api from '@/lib/axios';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import React, { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-type ClassSession = {
-  _id: string;
-  day: number;
-  month: number;
-  year: number;
-  startTime?: string;
-  endTime?: string;
-  attendance: Array<{
-    user: string;        // userId
-    status: 'present' | 'absent';
-  }>;
-};
+import { useFetchClasses } from '@/hooks/useFetchClasses';
+import { createClass, updateClass, deleteClass, updateAttendance } from '@/services/classService';
 
-type MarkAttendance = {
-  userId: string;
-  status: 'present' | 'absent';
-};
+import { Button } from '@/components/ui/button';
+import { ClassFormDialog } from "@/components/classes/ClassFormDialog";
+import { AttendanceDialog } from "@/components/classes/AttendanceDialog";
+
+import { ClassSession } from '@/types';
+import { GenerateClassesDialog } from '@/components/classes/GenerateClassesDialog'; // <-- Importa tu nuevo componente
 
 export default function ClassesPage() {
-  // Lista de clases
-  const [classes, setClasses] = useState<ClassSession[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Modales
-  const [showClassDialog, setShowClassDialog] = useState(false);
-  const [editingClass, setEditingClass] = useState<ClassSession | null>(null);
-
-  // Formulario para crear/editar
-  const [classForm, setClassForm] = useState({
-    day: '',
-    month: '',
-    year: '',
-    startTime: '',
-    endTime: '',
-  });
-
-  // Modal de asistencia
-  const [showAttendanceDialog, setShowAttendanceDialog] = useState(false);
-  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
-  // Array temporal para "attendances" => { userId, status }
-  const [attendanceData, setAttendanceData] = useState<MarkAttendance[]>([]);
-
-  // (Opcional) filtros por query: ?month=1&year=2025
   const searchParams = useSearchParams();
   const filterMonth = searchParams.get('month') || '';
   const filterYear = searchParams.get('year') || '';
 
-  // Cargar las clases
-  const fetchClasses = async () => {
-    setLoading(true);
-    try {
-      const query: any = {};
-      if (filterMonth) query.month = filterMonth;
-      if (filterYear) query.year = filterYear;
-      // GET /class-sessions?month=...&year=...
-      const res = await api.get('/class-sessions', { params: query });
-      setClasses(res.data);
-    } catch (error) {
-      console.error('Error al obtener clases:', error);
-      alert('Error al cargar clases.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { classes, loading, refetch } = useFetchClasses(filterMonth, filterYear);
 
-  useEffect(() => {
-    fetchClasses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterMonth, filterYear]);
+  // Diálogo para crear/editar clase manualmente
+  const [classDialogOpen, setClassDialogOpen] = useState(false);
+  const [editingClass, setEditingClass] = useState<ClassSession | null>(null);
 
-  // ------------------------
-  // CREAR O EDITAR CLASE
-  // ------------------------
+  // Diálogo para asistencia
+  const [attendanceDialogOpen, setAttendanceDialogOpen] = useState(false);
+  const [selectedClass, setSelectedClass] = useState<ClassSession | null>(null);
 
+  // Diálogo para “Generar clases” a partir de un schedule
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+
+  // ------------------------------------------------
+  // HANDLERS: crear / editar
+  // ------------------------------------------------
   const handleOpenCreateClass = () => {
     setEditingClass(null);
-    setClassForm({
-      day: '',
-      month: '',
-      year: '',
-      startTime: '',
-      endTime: '',
-    });
-    setShowClassDialog(true);
+    setClassDialogOpen(true);
   };
 
   const handleOpenEditClass = (cls: ClassSession) => {
     setEditingClass(cls);
-    setClassForm({
-      day: cls.day.toString(),
-      month: cls.month.toString(),
-      year: cls.year.toString(),
-      startTime: cls.startTime || '',
-      endTime: cls.endTime || '',
-    });
-    setShowClassDialog(true);
+    setClassDialogOpen(true);
   };
 
-  const handleSaveClass = async () => {
-    try {
-      const payload = {
-        day: parseInt(classForm.day, 10),
-        month: parseInt(classForm.month, 10),
-        year: parseInt(classForm.year, 10),
-        startTime: classForm.startTime || '',
-        endTime: classForm.endTime || '',
-      };
-
-      if (editingClass) {
-        // EDITAR
-        await api.put(`/class-sessions/${editingClass._id}`, payload);
-        alert('Clase actualizada correctamente.');
-      } else {
-        // CREAR
-        await api.post('/class-sessions', payload);
-        alert('Clase creada correctamente.');
-      }
-      setShowClassDialog(false);
-      fetchClasses();
-    } catch (error) {
-      console.error('Error al guardar clase:', error);
-      alert('Error al guardar la clase.');
+  const handleSaveClass = async (payload: Partial<ClassSession>) => {
+    if (editingClass) {
+      // Editar
+      await updateClass(editingClass._id, payload);
+      alert('Clase actualizada correctamente.');
+    } else {
+      // Crear
+      await createClass(payload);
+      alert('Clase creada correctamente.');
     }
+    refetch();
   };
 
-  // ------------------------
-  // ELIMINAR CLASE
-  // ------------------------
+  // ------------------------------------------------
+  // HANDLERS: eliminar
+  // ------------------------------------------------
   const handleDeleteClass = async (classId: string) => {
     if (!window.confirm('¿Seguro de eliminar esta clase?')) return;
-    try {
-      await api.delete(`/class-sessions/${classId}`);
-      alert('Clase eliminada correctamente.');
-      fetchClasses();
-    } catch (error) {
-      console.error('Error al eliminar clase:', error);
-      alert('Error al eliminar la clase.');
-    }
+    await deleteClass(classId);
+    alert('Clase eliminada correctamente.');
+    refetch();
   };
 
-  // ------------------------
-  // MARCAR ASISTENCIA
-  // ------------------------
+  // ------------------------------------------------
+  // HANDLERS: asistencia
+  // ------------------------------------------------
   const handleOpenAttendance = (cls: ClassSession) => {
-    setSelectedClassId(cls._id);
-    // Convertimos attendance en un array editable => { userId, status }
-    const data = cls.attendance.map((a) => ({
-      userId: a.user.toString(),
-      status: a.status,
-    }));
-    setAttendanceData(data);
-    setShowAttendanceDialog(true);
+    setSelectedClass(cls);
+    setAttendanceDialogOpen(true);
   };
 
-  const handleAddAttendanceRow = () => {
-    // Agregar fila en blanco
-    setAttendanceData((prev) => [...prev, { userId: '', status: 'present' }]);
+  const handleSaveAttendance = async (attendanceData: any) => {
+    if (!selectedClass) return;
+    await updateAttendance(selectedClass._id, attendanceData);
+    alert('Asistencia registrada/actualizada.');
+    refetch();
   };
 
-  const handleChangeAttendanceRow = (
-    index: number,
-    field: keyof MarkAttendance,
-    value: string
-  ) => {
-    setAttendanceData((prev) =>
-      prev.map((item, i) =>
-        i === index ? { ...item, [field]: value } : item
-      )
-    );
-  };
-
-  const handleRemoveAttendanceRow = (index: number) => {
-    setAttendanceData((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleSaveAttendance = async () => {
-    if (!selectedClassId) return;
-    try {
-      // PUT /class-sessions/:classId/attendance
-      await api.put(`/class-sessions/${selectedClassId}/attendance`, {
-        attendances: attendanceData,
-      });
-      alert('Asistencia registrada/actualizada.');
-      setShowAttendanceDialog(false);
-      fetchClasses();
-    } catch (error) {
-      console.error('Error al marcar asistencia:', error);
-      alert('Error al marcar asistencia.');
-    }
-  };
-
-  // ------------------------
+  // ------------------------------------------------
   // RENDER
-  // ------------------------
+  // ------------------------------------------------
   return (
-    <div className='py-8'>
-      <div className="flex items-center justify-between mb-4">
+    <div className="py-8">
+      <div className="flex items-center justify-between mb-4 gap-2">
         <h1 className="text-xl font-bold">Gestión de Clases</h1>
+
+        {/* Botón para generar clases en lote a partir de un schedule */}
+        <Button variant="outline" onClick={() => setGenerateDialogOpen(true)}>
+          Generar Clases por Schedule
+        </Button>
+
+        {/* Botón para crear clase manual */}
         <Button onClick={handleOpenCreateClass}>Crear Clase</Button>
       </div>
 
@@ -267,125 +153,28 @@ export default function ClassesPage() {
         </table>
       )}
 
-      {/* Modal CREAR/EDITAR CLASE */}
-      {showClassDialog && (
-        <Dialog open onOpenChange={() => setShowClassDialog(false)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                {editingClass ? 'Editar Clase' : 'Crear Clase'}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-2 py-2">
-              <Input
-                placeholder="Día (1..31)"
-                value={classForm.day}
-                onChange={(e) =>
-                  setClassForm((prev) => ({ ...prev, day: e.target.value }))
-                }
-              />
-              <Input
-                placeholder="Mes (1..12)"
-                value={classForm.month}
-                onChange={(e) =>
-                  setClassForm((prev) => ({ ...prev, month: e.target.value }))
-                }
-              />
-              <Input
-                placeholder="Año (por ej: 2025)"
-                value={classForm.year}
-                onChange={(e) =>
-                  setClassForm((prev) => ({ ...prev, year: e.target.value }))
-                }
-              />
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Hora inicio (hh:mm)"
-                  value={classForm.startTime}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      startTime: e.target.value,
-                    }))
-                  }
-                />
-                <Input
-                  placeholder="Hora fin (hh:mm)"
-                  value={classForm.endTime}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      endTime: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowClassDialog(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleSaveClass}>
-                {editingClass ? 'Guardar Cambios' : 'Crear'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* Diálogo CREAR/EDITAR CLASE */}
+      <ClassFormDialog
+        open={classDialogOpen}
+        onClose={() => setClassDialogOpen(false)}
+        initialData={editingClass}
+        onSubmit={handleSaveClass}
+      />
 
-      {/* Modal ASISTENCIA */}
-      {showAttendanceDialog && (
-        <Dialog open onOpenChange={() => setShowAttendanceDialog(false)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Marcar Asistencia</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-2 py-2">
-              <p className="text-sm text-gray-500">
-                Ajusta la asistencia de cada usuario. Ingresa el ID del usuario y el
-                estado (<em>present</em> o <em>absent</em>).
-              </p>
-              {attendanceData.map((item, index) => (
-                <div key={index} className="flex gap-2 items-center mb-1">
-                  <Input
-                    placeholder="User ID"
-                    value={item.userId}
-                    onChange={(e) =>
-                      handleChangeAttendanceRow(index, 'userId', e.target.value)
-                    }
-                  />
-                  <select
-                    className="border border-gray-300 rounded px-2 py-1"
-                    value={item.status}
-                    onChange={(e) =>
-                      handleChangeAttendanceRow(index, 'status', e.target.value)
-                    }
-                  >
-                    <option value="present">Presente</option>
-                    <option value="absent">Ausente</option>
-                  </select>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => handleRemoveAttendanceRow(index)}
-                  >
-                    Quitar
-                  </Button>
-                </div>
-              ))}
-              <Button variant="outline" onClick={handleAddAttendanceRow}>
-                Agregar fila
-              </Button>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAttendanceDialog(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleSaveAttendance}>Guardar Asistencia</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* Diálogo ASISTENCIA */}
+      <AttendanceDialog
+        open={attendanceDialogOpen}
+        onClose={() => setAttendanceDialogOpen(false)}
+        classData={selectedClass ?? undefined}
+        onSave={handleSaveAttendance}
+      />
+
+      {/* Diálogo para GENERAR CLASES por schedule */}
+      <GenerateClassesDialog
+        open={generateDialogOpen}
+        onClose={() => setGenerateDialogOpen(false)}
+        onSuccess={refetch} // para refrescar la lista de clases luego de generar
+      />
     </div>
   );
 }

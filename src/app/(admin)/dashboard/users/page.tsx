@@ -8,7 +8,7 @@ import EditUserDialog from "./EditUserDialog";
 import Link from "next/link";
 
 type User = {
-  _id: string;
+  id: string;
   username: string;
   email?: string;
   role?:
@@ -90,7 +90,7 @@ export default function UsersPage() {
               <tr key={index} className="border-b border-gray-200">
                 <td className="px-4 py-2">
                   <Link
-                    href={`/dashboard/users/${u._id}`}
+                    href={`/dashboard/users/${u.id}`}
                     className="text-blue-500 hover:underline"
                   >
                     {u.username}
@@ -112,7 +112,7 @@ export default function UsersPage() {
                   <Button
                     variant="destructive"
                     size="sm"
-                    onClick={() => handleDelete(u._id)}
+                    onClick={() => handleDelete(u.id)}
                   >
                     Eliminar
                   </Button>

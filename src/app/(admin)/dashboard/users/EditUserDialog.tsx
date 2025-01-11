@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import api from "@/lib/axios";
 
 type User = {
-  _id: string;
+  id: string;
   username: string;
   email?: string;
   role?: string | { name: string };
@@ -46,7 +46,7 @@ export default function EditUserDialog({ user, onClose }: Props) {
   const handleUpdate = async () => {
     setLoading(true);
     try {
-      await api.put(`/users/${user._id}`, {
+      await api.put(`/users/${user.id}`, {
         username,
         email,
         roleName,
