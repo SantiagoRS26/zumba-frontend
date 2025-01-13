@@ -1,36 +1,50 @@
-// app/classes/page.tsx (por ejemplo)
-'use client';
+// app/classes/page.tsx
+"use client";
 
-import React, { useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import React, { useState } from "react";
+import { useSearchParams } from "next/navigation";
 
-import { useFetchClasses } from '@/hooks/useFetchClasses';
-import { createClass, updateClass, deleteClass, updateAttendance } from '@/services/classService';
+import { useFetchClasses } from "@/hooks/useFetchClasses";
+import {
+  createClass,
+  updateClass,
+  deleteClass,
+  updateAttendance,
+  // Nuevo: un servicio para asignar profesor
+  assignTeacherToClass,
+} from "@/services/classService";
 
-import { Button } from '@/components/ui/button';
+import { Button } from "@/components/ui/button";
 import { ClassFormDialog } from "@/components/classes/ClassFormDialog";
 import { AttendanceDialog } from "@/components/classes/AttendanceDialog";
+import { GenerateClassesDialog } from "@/components/classes/GenerateClassesDialog";
 
-import { ClassSession } from '@/types';
-import { GenerateClassesDialog } from '@/components/classes/GenerateClassesDialog'; // <-- Importa tu nuevo componente
+import { ClassSession } from "@/types";
+import { ClassesList } from "@/components/classes/ClassesList";
+import { BulkActionsBar } from "@/components/classes/BulkActionsBar";
 
 export default function ClassesPage() {
   const searchParams = useSearchParams();
-  const filterMonth = searchParams.get('month') || '';
-  const filterYear = searchParams.get('year') || '';
+  const filterMonth = searchParams.get("month") || "";
+  const filterYear = searchParams.get("year") || "";
 
   const { classes, loading, refetch } = useFetchClasses(filterMonth, filterYear);
 
-  // Diálogo para crear/editar clase manualmente
+  // ESTADO: para asignar profesor
+  // (puede que quieras un modal, tipo "AssignTeacherDialog", 
+  //  pero aquí lo haremos simple)
+
+  // ESTADO: Para los diálogos de crear/editar, asistencia y generar:
   const [classDialogOpen, setClassDialogOpen] = useState(false);
   const [editingClass, setEditingClass] = useState<ClassSession | null>(null);
 
-  // Diálogo para asistencia
   const [attendanceDialogOpen, setAttendanceDialogOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState<ClassSession | null>(null);
 
-  // Diálogo para “Generar clases” a partir de un schedule
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+
+  // ESTADO: IDs de las clases seleccionadas en la tabla (multi-selección)
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
 
   // ------------------------------------------------
   // HANDLERS: crear / editar
@@ -46,30 +60,38 @@ export default function ClassesPage() {
   };
 
   const handleSaveClass = async (payload: Partial<ClassSession>) => {
-    if (editingClass) {
-      // Editar
-      await updateClass(editingClass._id, payload);
-      alert('Clase actualizada correctamente.');
-    } else {
-      // Crear
-      await createClass(payload);
-      alert('Clase creada correctamente.');
+    try {
+      if (editingClass) {
+        await updateClass(editingClass._id, payload);
+        alert("Clase actualizada correctamente.");
+      } else {
+        await createClass(payload);
+        alert("Clase creada correctamente.");
+      }
+      refetch();
+    } catch (error) {
+      console.error(error);
+      alert("Hubo un error al guardar la clase.");
     }
-    refetch();
   };
 
   // ------------------------------------------------
-  // HANDLERS: eliminar
+  // HANDLERS: eliminar (individual)
   // ------------------------------------------------
   const handleDeleteClass = async (classId: string) => {
-    if (!window.confirm('¿Seguro de eliminar esta clase?')) return;
-    await deleteClass(classId);
-    alert('Clase eliminada correctamente.');
-    refetch();
+    if (!window.confirm("¿Seguro de eliminar esta clase?")) return;
+    try {
+      await deleteClass(classId);
+      alert("Clase eliminada correctamente.");
+      refetch();
+    } catch (error) {
+      console.error(error);
+      alert("Hubo un error al eliminar la clase.");
+    }
   };
 
   // ------------------------------------------------
-  // HANDLERS: asistencia
+  // HANDLERS: asistencia (individual)
   // ------------------------------------------------
   const handleOpenAttendance = (cls: ClassSession) => {
     setSelectedClass(cls);
@@ -78,9 +100,90 @@ export default function ClassesPage() {
 
   const handleSaveAttendance = async (attendanceData: any) => {
     if (!selectedClass) return;
-    await updateAttendance(selectedClass._id, attendanceData);
-    alert('Asistencia registrada/actualizada.');
-    refetch();
+    try {
+      await updateAttendance(selectedClass._id, attendanceData);
+      alert("Asistencia registrada/actualizada.");
+      refetch();
+    } catch (error) {
+      console.error(error);
+      alert("Hubo un error al actualizar la asistencia.");
+    }
+  };
+
+  // ------------------------------------------------
+  // HANDLERS: generar clases por schedule
+  // ------------------------------------------------
+  const handleOpenGenerateDialog = () => {
+    setGenerateDialogOpen(true);
+  };
+
+  // ------------------------------------------------
+  // HANDLERS: selección múltiple
+  // ------------------------------------------------
+  /**
+   * Cuando el usuario marca/desmarca una clase en la tabla
+   */
+  const handleToggleSelectClass = (classId: string) => {
+    setSelectedClassIds((prev) => {
+      if (prev.includes(classId)) {
+        return prev.filter((id) => id !== classId);
+      } else {
+        return [...prev, classId];
+      }
+    });
+  };
+
+  /**
+   * Marca o desmarca TODAS las clases
+   */
+  const handleToggleSelectAll = (allClassIds: string[]) => {
+    // Si YA están todas seleccionadas, las deseleccionamos
+    // de lo contrario, las seleccionamos
+    const allSelected = allClassIds.every((id) => selectedClassIds.includes(id));
+    if (allSelected) {
+      setSelectedClassIds([]);
+    } else {
+      setSelectedClassIds(allClassIds);
+    }
+  };
+
+  // ------------------------------------------------
+  // HANDLERS: acciones en bloque
+  // ------------------------------------------------
+  const handleBulkDelete = async () => {
+    if (
+      !window.confirm(
+        `Vas a eliminar ${selectedClassIds.length} clases. ¿Continuar?`
+      )
+    )
+      return;
+    try {
+      // Podrías tener un endpoint masivo, 
+      // pero aquí haremos un loop (simple)
+      for (const classId of selectedClassIds) {
+        await deleteClass(classId);
+      }
+      alert(`${selectedClassIds.length} clase(s) eliminadas`);
+      setSelectedClassIds([]);
+      refetch();
+    } catch (error) {
+      console.error(error);
+      alert("Hubo un error al eliminar en lote.");
+    }
+  };
+
+  const handleBulkAssignTeacher = async (teacherId: string) => {
+    try {
+      for (const classId of selectedClassIds) {
+        await assignTeacherToClass(classId, teacherId);
+      }
+      alert(`Profesor asignado a ${selectedClassIds.length} clase(s).`);
+      setSelectedClassIds([]);
+      refetch();
+    } catch (error) {
+      console.error(error);
+      alert("Hubo un error al asignar el profesor en lote.");
+    }
   };
 
   // ------------------------------------------------
@@ -90,70 +193,38 @@ export default function ClassesPage() {
     <div className="py-8">
       <div className="flex items-center justify-between mb-4 gap-2">
         <h1 className="text-xl font-bold">Gestión de Clases</h1>
-
-        {/* Botón para generar clases en lote a partir de un schedule */}
-        <Button variant="outline" onClick={() => setGenerateDialogOpen(true)}>
+        <Button variant="outline" onClick={handleOpenGenerateDialog}>
           Generar Clases por Schedule
         </Button>
-
-        {/* Botón para crear clase manual */}
         <Button onClick={handleOpenCreateClass}>Crear Clase</Button>
       </div>
+
+      {/* Acciones en bloque, si hay clases seleccionadas */}
+      {selectedClassIds.length > 0 && (
+        <BulkActionsBar
+          selectedCount={selectedClassIds.length}
+          onBulkDelete={handleBulkDelete}
+          onBulkAssignTeacher={handleBulkAssignTeacher}
+        />
+      )}
 
       {loading ? (
         <p>Cargando clases...</p>
       ) : classes.length === 0 ? (
         <p>No hay clases registradas.</p>
       ) : (
-        <table className="w-full bg-white border border-gray-200 text-sm">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="px-4 py-2 text-left">Fecha</th>
-              <th className="px-4 py-2 text-left">Horario</th>
-              <th className="px-4 py-2 text-left">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {classes.map((cls) => {
-              const dateStr = `${cls.day}/${cls.month}/${cls.year}`;
-              const timeStr = cls.startTime
-                ? `${cls.startTime} - ${cls.endTime}`
-                : 'Sin horario';
-              return (
-                <tr key={cls._id} className="border-b border-gray-200">
-                  <td className="px-4 py-2">{dateStr}</td>
-                  <td className="px-4 py-2">{timeStr}</td>
-                  <td className="px-4 py-2 flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleOpenAttendance(cls)}
-                    >
-                      Asistencia
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleOpenEditClass(cls)}
-                    >
-                      Editar
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDeleteClass(cls._id)}
-                    >
-                      Eliminar
-                    </Button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <ClassesList
+          classes={classes}
+          selectedClassIds={selectedClassIds}
+          onToggleSelectClass={handleToggleSelectClass}
+          onToggleSelectAll={handleToggleSelectAll}
+          onOpenAttendance={handleOpenAttendance}
+          onEditClass={handleOpenEditClass}
+          onDeleteClass={handleDeleteClass}
+        />
       )}
 
-      {/* Diálogo CREAR/EDITAR CLASE */}
+      {/* Diálogos */}
       <ClassFormDialog
         open={classDialogOpen}
         onClose={() => setClassDialogOpen(false)}
@@ -161,7 +232,6 @@ export default function ClassesPage() {
         onSubmit={handleSaveClass}
       />
 
-      {/* Diálogo ASISTENCIA */}
       <AttendanceDialog
         open={attendanceDialogOpen}
         onClose={() => setAttendanceDialogOpen(false)}
@@ -169,11 +239,10 @@ export default function ClassesPage() {
         onSave={handleSaveAttendance}
       />
 
-      {/* Diálogo para GENERAR CLASES por schedule */}
       <GenerateClassesDialog
         open={generateDialogOpen}
         onClose={() => setGenerateDialogOpen(false)}
-        onSuccess={refetch} // para refrescar la lista de clases luego de generar
+        onSuccess={refetch}
       />
     </div>
   );

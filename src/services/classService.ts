@@ -37,7 +37,12 @@ export async function updateAttendance(
 	classId: string,
 	attendances: MarkAttendance[]
 ) {
+	console.log("attendances: ", attendances);
 	return await api.put(`/class-sessions/${classId}/attendance`, {
 		attendances,
 	});
 }
+
+export async function assignTeacherToClass(classId: string, teacherId: string) {
+	return api.put(`/class-sessions/${classId}/assign-teacher`, { teacherId });
+  }
